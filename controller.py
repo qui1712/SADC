@@ -26,6 +26,99 @@ plt.rcParams.update({"axes.grid": True})
 # Set the plotting style to interactive (autoshows plots)
 plt.ion()
 
+# %% Auxiliary functions
+
+
+def calc_kd(kp1: float,
+            kp3: float,
+            zeta: float,
+            J_11: float = 2500,
+            J_22: float = 2300,
+            J_33: float = 3100,
+            h: float = 700e3):
+    """
+    Compute the differentiation gains for the roll and yaw axes.
+
+    Given the proportional gains and damping factor, compute the
+    differentiation gains for the roll and yaw axes.
+
+    Parameters
+    ----------
+    kp1 : float
+        Proportional gain for the roll axis.
+    kp3 : float
+        Proportional gain for the yaw axis.
+    zeta : float
+        Damping factor for both axis.
+    J_11 : float
+        Moment of inertia about axis 1, in kg m^2.
+    J_22 : float
+        Moment of inertia about axis 2, in kg m^2.
+    J_33 : float
+        Moment of inertia about axis 3, in kg m^2.
+    h : float
+        Altitude of the spacecraft in m.
+
+    Returns
+    -------
+    kd1 : float
+        Differentiation gain for the roll axis.
+    kd3 : float
+        Differentiation gain for the yaw axis.
+    """
+    # Compute the mean motion
+    n = np.sqrt(const.GM_earth.value/(const.R_earth.value+h)**3)
+    # Compute the constants required for the computation
+    B1 = (4*n**2*(J_22-J_33) - kp1)/J_11
+    B3 = (n**2*(J_22-J_11) - kp3)/J_33
+    C1 = n*(J_11-J_22+J_33)/J_33
+    C3 = n*(J_11-J_22+J_33)/J_11
+    K = -(1-np.sqrt(B3/B1))/(1-np.sqrt(B1/B3))
+    # Compute the differentiation gains
+    kd1 = -2*J_11*zeta*np.sqrt((B1+B3+C1*C3+2*(1-2*zeta**2)*np.sqrt(B1*B3)) /
+                               (K**2+2*(1-2*zeta**2)*K + 1))
+    kd3 = K*J_33/J_11*kd1
+    return kd1, kd3
+
+
+def settling_time(t_arr: np.ndarray[float],
+                  signal: np.ndarray[float],
+                  ref_val: float,
+                  settling_val: float):
+    """
+    Compute the settling time for the given history.
+
+    Parameters
+    ----------
+    t_arr : np.ndarray[float]
+        Array of timestamps.
+    signal : np.ndarray[float]
+        Array of signal values corresponding to t_arr.
+    ref_val : float
+        Reference value.
+    settling_val : float
+        Value to within which ref_val must be approached.
+
+    Returns
+    -------
+    t_sett : float
+        Settling time.
+    """
+    settled_arr = np.where(np.abs(signal-ref_val) < settling_val,
+                           True, False)
+    # Loop through array backwards
+    for idx, settled in enumerate(settled_arr[::-1]):
+        # Check if not settled
+        if not settled:
+            # After encountering first value which has not settled,
+            # save the settling time and break
+            t_sett = t_arr[-idx+1]
+            break
+    return t_sett
+
+
+# %% Class definition
+
 
 class Controller:
     """
@@ -49,6 +142,7 @@ class Controller:
             Reference attitude of the controller, with angles given in rad.
         gains : np.ndarray[float]
             Gains for the controller, with an entry per state variable.
+            Entries must be given in Nm/rad and Nms/rad
         """
         # Save the reference attitude and gains
         self.ref_att = reference_attitude

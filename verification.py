@@ -108,12 +108,12 @@ class LinearisedEoM:
         state_deriv = np.zeros((6,))
         # Commented out terms appear in manual linearisation of these
         # equations, but not in the expressions in the slides; turns out they
-        # are negligible. :)
+        # are nearly negligible :)
         state_deriv[0] = omg1 + n*th3  # + omg3*th2
         state_deriv[1] = omg2 + n  # - th1*omg3
-        state_deriv[2] = omg3 + th1*omg2
+        state_deriv[2] = omg3 + omg2*th1  # + th1*omg2  # + n*th2*th3
         state_deriv[3] = C1*omg3*omg2 - 3*n**2*th1*C1 + Td[0]/J_11
-        state_deriv[4] = 3*n**2*C2*th2 + Td[1]/J_22 + C2*omg1*omg3
+        state_deriv[4] = 3*n**2*C2*th2 + Td[1]/J_22  # + C2*omg1*omg3
         state_deriv[5] = C3*omg2*omg1 + Td[2]/J_33
         return state_deriv
 
