@@ -33,7 +33,144 @@ plt.ion()
 class SimpleEstimator:
     """
     Estimator that straightforwardly takes the measurement as state estimate.
+
+    Attributes
+    ----------
+    controller : instance of Controller
+        An instance of the custom Controller class, which represents
+        the controller of the spacecraft. Should have a method
+        self.response which takes the state as input and returns the
+        corresponding control torques as output.
+    internal_model : instance of SpacecraftAttitude
+        The EoM-model used to propagate the state internally.
     """
+
+    def __init__(self,
+                 controller,
+                 J_11: float = 2500,
+                 J_22: float = 2300,
+                 J_33: float = 3100,
+                 h: float = 700e3,
+                 method='RK45',
+                 rtol=1e-7,
+                 atol_att=1e-6,
+                 atol_rate=1e-8):
+        """
+        Initialise the estimator.
+
+        Parameters
+        ----------
+        controller : instance of Controller
+            An instance of the custom Controller class, which represents
+            the controller of the spacecraft. Should have a method
+            self.response which takes the state as input and returns the
+            corresponding control torques as output.
+        internal_model : instance of SpacecraftAttitude
+            The EoM-model used to propagate the state internally.
+        att_std : np.ndarray[float]
+            Standard deviation of the white-normal noise attitude angle
+            measurements in degrees.
+        gyro_bias : np.ndarray[float]
+            Bias of the angular velocity measurements in degree/s.
+        J_11 : float
+            Moment of inertia about axis 1, in kg m^2.
+        J_22 : float
+            Moment of inertia about axis 2, in kg m^2.
+        J_33 : float
+            Moment of inertia about axis 3, in kg m^2.
+        h : float
+            Altitude of the spacecraft in m.
+        method : str
+            Method to pass to sp.integrate.solve_ivp.
+        rtol : float
+            Relative tolerance for integration of all state variables.
+        atol_att : float
+            Absolute tolerance for the attitudes in degrees.
+        atol_rate : float
+            Absolute tolerance for the angular velocities in deg/s.
+        """
+        # Save the controller as attribute
+        self.controller = controller
+        # Save the integration settings
+        self.method = method
+        # Convert the absolute tolerance to rad and rad/s
+        atol = np.ones((6,))
+        atol[:3] *= atol_att/180*np.pi
+        atol[3:] *= atol_rate/180*np.pi
+        self.atol = atol
+        self.rtol = rtol
+
+    def estimate(self,
+                 tk: float,
+                 measurement_dt: float,
+                 measurement: np.ndarray[float],
+                 x_kn1k: np.ndarray[float],
+                 P_kk: np.ndarray[float],
+                 K_k: np.ndarray[float]):
+        """
+        Compute an estimate for the state.
+
+        Produce a perfect-knowledge controller, as well as a "dumb" estimate
+        for the current state by directly forwarding the state measurement.
+        The call and return signatures mimic that of KalmanController.estimate,
+        and so are somewhat obtuse.
+
+        Parameters
+        ----------
+        measurement : np.ndarray[float]
+            A measurement of the state retrieved from the sensors.
+        tk : float,
+            Time at which sensor_state was obtained in s.
+        measurement_dt : float
+            Time from tk until next sensor measurement in s.
+        x_kkn1 : np.ndarray[float]
+            State prediction from previous measurement epoch.
+        P_kk : np.ndarray[float]
+            Estimated state covariance.
+        K_k : np.ndarray[float]
+            Kalman gain.
+
+        Returns
+        -------
+        x_kk : np.ndarray[float]
+            An estimate for the current state.
+        x_k1k : np.ndarray[float]
+            A prediction for the state at the next measurement epoch.
+        P_k1k1 : np.ndarray[float]
+            Estimated state covariance at the next measurement epoch.
+        K_k1 : np.ndarray[float]
+            Kalman gain for the next measurement epoch.
+        Mu : function
+            Commanded control input over the timespan until the next
+            measurement epoch, with call signature (t, state).
+        """
+
+        def Mu(t, state):
+            return interpolant(t)
+
+        return measurement, 0, 0, 0, Mu
+
+    def control_torque(self,
+                       t: float,
+                       state: np.ndarray[float]):
+        """
+        Determine the control torque for a given time and state.
+
+        Parameters
+        ----------
+        time : float
+            Time at which to determine the control torque.
+        state : np.ndarray[float]
+            State for which to determine the control torque.
+
+        Returns
+        -------
+        Mu : np.ndarray[float]
+            Commanded control torque.
+        """
+        # Determine the control response from the controller for this state
+        Mu = self.controller.response(state)
+        return Mu
 
 
 class KalmanController:
@@ -42,7 +179,13 @@ class KalmanController:
 
     Attributes
     ----------
-
+    controller : instance of Controller
+        An instance of the custom Controller class, which represents
+        the controller of the spacecraft. Should have a method
+        self.response which takes the state as input and returns the
+        corresponding control torques as output.
+    internal_model : instance of SpacecraftAttitude
+        The EoM-model used to propagate the state internally.
     """
 
     def __init__(self,
@@ -60,7 +203,8 @@ class KalmanController:
                  method='RK45',
                  rtol=1e-7,
                  atol_att=1e-6,
-                 atol_rate=1e-8,):
+                 atol_rate=1e-8,
+                 seed=4313):
         """
         Initialise the estimator.
 
@@ -101,6 +245,8 @@ class KalmanController:
             Absolute tolerance for the attitudes in degrees.
         atol_rate : float
             Absolute tolerance for the angular velocities in deg/s.
+        seed : int
+            Seed for the random number generator of the internal model.
         """
         # Save the controller as attribute
         self.controller = controller
@@ -136,6 +282,7 @@ class KalmanController:
         # converted to rad
         self.x_kk = x0/(180*np.pi)
         self.P_kk = P0/(180*np.pi)**2
+        # TODO: initialise the internal model
 
     def control_torque(self,
                        t: float,
@@ -160,23 +307,29 @@ class KalmanController:
         return Mu
 
     def update_predict(self,
-                       measurement: np.ndarray[float],
-                       state_pred: np.ndarray[float],
+                       z_k: np.ndarray[float],
+                       x_kkn1: np.ndarray[float],
                        P_kk: np.ndarray[float],
-                       K_k: np.ndarray[float]):
+                       K_k: np.ndarray[float],
+                       tk: float,
+                       tk1: float):
         """
         Perform the update and prediction-step.
 
         Parameters
         ----------
-        measurement : np.ndarray[float]
+        z_k : np.ndarray[float]
             Measurement of the state.
-        state_pred : np.ndarray[float]
+        x_kkn1 : np.ndarray[float]
             Prediction of the state from the previous state estimate.
         P_kk : np.ndarray[float]
             Estimated state covariance matrix.
         K_k : np.ndarray[float]
             Kalman gain.
+        tk : float
+            Time at which the measurement z_k was taken.
+        tk1 : float
+            Time at which the next measurement will be taken.
 
         Returns
         -------
@@ -188,7 +341,50 @@ class KalmanController:
         x_k1k : np.ndarray[float]
             Predicted state at the next measurement epoch.
         """
-        ...
+        # Measurement update ##################################################
+        x_kk = x_kkn1 + K_k @ (z_k - self.H @ x_kkn1)
+
+        # Prediction and control scheduling ###################################
+        tint = [tk, tk1]
+        # Define the equations of motion with perfect control input
+
+        def perfect_eom(t, state):
+            return self.internal_model.compute_EoM(t, state,
+                                                   self.control_torque)
+
+        # Perform the prediction step #########################################
+        integrator = sp.integrate.solve_ivp(perfect_eom,
+                                            tint,
+                                            x_kk,
+                                            method=self.method,
+                                            rtol=self.rtol,
+                                            atol=self.atol)
+        predict_state_hist = integrator.y
+        predict_t_arr = integrator.t
+        # Extract the predicted state
+        x_k1k = predict_state_hist[:, -1]
+
+        # Determine the control input #########################################
+        # Determine control input by interpolating between tk and tk1
+        # Produce the history of control inputs at each t in predict_t_arr
+        predict_u = np.zeros((3, predict_t_arr.shape[0]))
+        for idx, t_p in enumerate(predict_t_arr):
+            predict_u[:, idx] = self.control_torque(
+                t_p, predict_state_hist[:, idx])
+
+        # Create an interpolant using cubic splines
+        interpolant = sp.interpolate.CubicSpline(
+            predict_t_arr,
+            predict_u,
+            axis=1)
+        # Define the commanded control input as function of time
+
+        def u_k(t, state):
+            return interpolant(t)
+
+        # Propagate P_kk
+        P_k1k = Phi_k1k @ P_kk @ Phi_k1k.T + self.Q
+        # TODO: check if P_k1k is satisfactory
         return u_k, P_k1k, x_k1k
 
     def precompute(self,
@@ -224,114 +420,58 @@ class KalmanController:
         P_k1k1 = (np.eye(self.x_kk.shape[0]) - K_k1 @ H) @ P_k1k
         return K_k1, P_k1k1
 
-    def sensor(self,
-               state: np.ndarray[float]):
-        """
-        Retrieve the state from the "sensors".
-
-        Takes the given state and produces an imperfect estimate for that
-        state using the given attitude control inaccuracy and gyro bias.
-
-        Parameters
-        ----------
-        state : np.ndarray[float]
-            (True) state at which to estimate the state.
-
-        Returns
-        -------
-        measurement : np.ndarray[float]
-            A (corrupted) measurement of the state.
-        """
-        # Draw the attitude offset from a centred normal distribution
-        att_offset = np.random.normal(loc=0,
-                                      scale=self.att_std,
-                                      size=(3,))
-        # The gyro bias is fixed, and no noise is added to that
-        # Compute and return the corrupted state estimate
-        measurement = state[:6]
-        measurement[:3] = measurement[:3] + att_offset
-        measurement[3:] = measurement[3:] + self.gyro_bias
-        return measurement
-
     def estimate(self,
                  tk: float,
                  measurement_dt: float,
-                 sensor_state: np.ndarray[float]):
+                 measurement: np.ndarray[float],
+                 x_kn1k: np.ndarray[float],
+                 P_kk: np.ndarray[float],
+                 K_k: np.ndarray[float]):
         """
-        Compute an estimate for the state.
+        Compute the commanded control moment and an estimate for the state.
 
-        Compute an estimate for the state by first retrieving the sensor
-        output and then passing this through an Extended Kalman Filter (EKF)
-        to yield an estimate for the true state.
+        Compute an estimate for the state by passing this through an
+        Extended Kalman Filter (EKF) to yield an estimate for the true state.
+        Produce the commanded control input for the control actuators.
 
         Parameters
         ----------
-        sensor_state : np.ndarray[float]
-            A state retrieved from the sensors.
+        measurement : np.ndarray[float]
+            A measurement of the state retrieved from the sensors.
         tk : float,
             Time at which sensor_state was obtained in s.
         measurement_dt : float
             Time from tk until next sensor measurement in s.
+        x_kkn1 : np.ndarray[float]
+            State prediction from previous measurement epoch.
+        P_kk : np.ndarray[float]
+            Estimated state covariance.
+        K_k : np.ndarray[float]
+            Kalman gain.
 
         Returns
         -------
-        est_state : np.ndarray[float]
+        x_kk : np.ndarray[float]
             An estimate for the current state.
-        pred_state : np.ndarray[float]
+        x_k1k : np.ndarray[float]
             A prediction for the state at the next measurement epoch.
+        P_k1k1 : np.ndarray[float]
+            Estimated state covariance at the next measurement epoch.
+        K_k1 : np.ndarray[float]
+            Kalman gain for the next measurement epoch.
         Mu : function
             Commanded control input over the timespan until the next
             measurement epoch, with call signature (t, state).
         """
-        if self.perfect:
-            # For a perfect estimator, do not pass through the whole Kalman
-            # filter routine, and just return the sensor state.
-            est_state = np.copy(sensor_state)
-            return est_state
-        else:
-            # Do Kalman filter magic:
-            # Measurement update ##############################################
+        # Do Kalman filter magic:
 
-            # Prediction and control scheduling ###############################
-            tint = [tk, tk+measurement_dt]
-            # Define the equations of motion with perfect control input
+        # Compute the state prediction error covariance matrix
 
-            def perfect_eom(t, state):
-                return self.compute_EoM(t, state, self.control_torque)
+        # Compute the Kalman gain
 
-            # Perform the prediction step #####################################
-            integrator = sp.integrate.solve_ivp(perfect_eom,
-                                                tint,
-                                                self.x_kk,
-                                                method=self.method,
-                                                rtol=self.rtol,
-                                                atol=self.atol)
-            predict_state_hist = integrator.y
-            predict_t_arr = integrator.t
-            # Determine control input by interpolating between tk and tk1
-            # Produce the history of control inputs at each t in predict_t_arr
-            predict_u = np.zeros((3, predict_t_arr.shape[0]))
-            for idx, t_p in enumerate(predict_t_arr):
-                predict_u[:, idx] = self.control_torque(
-                    t_p, predict_state_hist[:, idx])
-
-            # Create an interpolant using cubic splines
-            interpolant = sp.interpolate.CubicSpline(
-                predict_t_arr,
-                predict_u,
-                axis=1)
-            # Define the commanded control input as function of time
-
-            def commanded_Mu(t, state):
-                return interpolant(t)
-
-            # Compute the state prediction error covariance matrix
-
-            # Compute the Kalman gain
-
-            ###################################################################
-            est_state = ...
-            return est_state
+        ###################################################################
+        est_state = ...
+        return est_state
 
 
 class SpacecraftAttitude:
@@ -344,21 +484,29 @@ class SpacecraftAttitude:
     """
 
     def __init__(self,
-                 estimator,
-                 Td: np.ndarray[float] = np.array([1e-3, 1e-3, 1e-3]),
+                 estimator=None,
+                 Td_std: np.ndarray[float] = np.array([1e-3, 1e-3, 1e-3]),
+                 Td_mean: np.ndarray[float] = np.array([0, 0, 0]),
                  J_11: float = 2500,
                  J_22: float = 2300,
                  J_33: float = 3100,
-                 h: float = 700e3):
+                 h: float = 700e3,
+                 seed: int = 4663861):
         """
         Initialise the SpacecraftAttitude object.
 
         Parameters
         ----------
-        estimator : instance of Estimator class
-            Estimator to use.
-        Td : np.ndarray[float]
-            Disturbance torques in the LVLH frame in Nm.
+        estimator : instance of Estimator class or NoneType
+            Estimator to use. Must have methods self.sensor and self.estimate.
+            If set to None, does not use a control input altogether.
+        Td_std : np.ndarray[float]
+            Standard deviation of the disturbance torques in the LVLH frame
+            in Nm.
+        Td_mean : np.ndarray[float]
+            Mean value of the disturbance torques in the LVLH frame in Nm. In
+            principle, there is no need to use this; I use it to verify the
+            proper implementation of the moments in the linear case, though.
         J_11 : float
             Moment of inertia about axis 1, in kg m^2.
         J_22 : float
@@ -367,26 +515,30 @@ class SpacecraftAttitude:
             Moment of inertia about axis 3, in kg m^2.
         h : float
             Altitude of the spacecraft in m.
+        seed : int
+            Seed for the random number generator.
         """
         # Save the moments of inertia to attributes
         self.J_11 = J_11
         self.J_22 = J_22
         self.J_33 = J_33
         # Save often-occurring derivative quantities to avoid recomputation
-        self.C1 = (J_22-J_33)/J_11
-        self.C2 = (J_33-J_11)/J_22
-        self.C3 = (J_11-J_22)/J_33
+        self.K1 = (J_22-J_33)/J_11
+        self.K2 = (J_33-J_11)/J_22
+        self.K3 = (J_11-J_22)/J_33
         # Compute the mean motion, and save the mean motion, altitude and
         # orbital period
         n = np.sqrt(const.GM_earth.value/(const.R_earth.value+h)**3)
         self.n = n
         self.h = h
         self.P = 2*np.pi/n
-        # Save the disturbance torques (as this was not explicitly given,
-        # I have assumed these to be in the body-fixed frame)
-        self.Td = Td
+        # Save the disturbance torques properties
+        self.Td_std = Td_std
+        self.Td_mean = Td_mean
         # Save the estimator as attribute
         self.state_estimator = estimator
+        # Initialise a seeded random number generator
+        self.rng = np.random.default_rng(seed)
 
     def compute_EoM(self,
                     t: float,
@@ -425,24 +577,28 @@ class SpacecraftAttitude:
         omg3 = state[5]  # rad/s, omega3
         # Extract attributes
         n = self.n
-        C1 = self.C1
-        C2 = self.C2
-        C3 = self.C3
+        K1 = self.K1
+        K2 = self.K2
+        K3 = self.K3
         J_11 = self.J_11
         J_22 = self.J_22
         J_33 = self.J_33
-        Td = self.Td
         # Preallocate output array
         state_derivs = np.zeros((6,))
+        # Compute moments
+        # Disturbance torque as random variable
+        Td = self.rng.normal(self.Td_mean, self.Td_std)
         # Calculate the control moment
         Mu_comp = Mu(t, state)
-        # Pre-compute the total torque
-        M1_J11 = -3/4*n**2*(1+np.cos(2*th2))*np.sin(2*th1)*C1 + \
-            Td[0]/J_11 + Mu_comp[0]/J_11
-        M2_J22 = 3/2*n**2*np.sin(2*th2)*np.cos(th1)*C2 + \
-            Td[1]/J_22 + Mu_comp[1]/J_22
-        M3_J33 = 3/2*n**2*np.sin(2*th2)*np.sin(th1)*C3 + \
-            Td[2]/J_33 + Mu_comp[2]/J_33
+        # Compute the total moment
+        M_tot = Td + Mu_comp
+        # Pre-compute the total torque, including the reference frame effects
+        M1_J11 = -3/4*n**2*(1+np.cos(2*th2))*np.sin(2*th1)*K1 + \
+            M_tot[0]/J_11
+        M2_J22 = 3/2*n**2*np.sin(2*th2)*np.cos(th1)*K2 + \
+            M_tot[1]/J_22
+        M3_J33 = 3/2*n**2*np.sin(2*th2)*np.sin(th1)*K3 + \
+            M_tot[2]/J_33
         # Compute the state derivative
         state_derivs[0] = omg1 + np.sin(th1)*np.tan(th2)*omg2 + \
             np.cos(th1)*np.tan(th2)*omg3 + n*np.sin(th3)/np.cos(th2)
@@ -450,10 +606,116 @@ class SpacecraftAttitude:
             n*np.cos(th3)
         state_derivs[2] = np.sin(th1)/np.cos(th2)*omg2 + \
             np.cos(th1)/np.cos(th2)*omg3 + n*np.tan(th2)*np.sin(th3)
-        state_derivs[3] = C1*omg2*omg3 + M1_J11
-        state_derivs[4] = C2*omg1*omg3 + M2_J22
-        state_derivs[5] = C3*omg1*omg2 + M3_J33
+        state_derivs[3] = K1*omg2*omg3 + M1_J11
+        state_derivs[4] = K2*omg1*omg3 + M2_J22
+        state_derivs[5] = K3*omg1*omg2 + M3_J33
         return state_derivs
+
+    def compute_Jacobian(self,
+                         state: np.ndarray[float]):
+        """
+        Compute the Jacobian of the equations of motion w.r.t. the state.
+
+        Parameters
+        ----------
+        state : np.ndarray[float]
+            State at which to compute the Jacobian.
+
+        Returns
+        -------
+        Fk : np.ndarray[float]
+            The Jacobian evaluated at the given state.
+        """
+        # Extract attributes
+        n = self.n
+        K1 = self.K1
+        K2 = self.K2
+        K3 = self.K3
+        # Extract state quantities
+        th1 = state[0]
+        th2 = state[1]
+        th3 = state[2]
+        omg1 = state[3]
+        omg2 = state[4]
+        omg3 = state[5]
+        # Compute the trigonometric functions for th1-th3
+        sinth1 = np.sin(th1)
+        sinth3 = np.sin(th3)
+        costh1 = np.cos(th1)
+        costh2 = np.cos(th2)
+        costh3 = np.cos(th3)
+        secth2 = 1/costh2
+        tanth2 = np.tan(th2)
+        sin2th2 = np.sin(2*th2)
+        cos2th2 = np.cos(2*th2)
+        # Preallocate an array for the Jacobian
+        Fk = np.zeros((9, 9))
+        # Compute the entries of the Jacobian
+        # Row 1
+        Fk[0, 0] = tanth2(omg1*costh1 - omg3*sinth1)
+        Fk[0, 1] = secth2**2*(omg2*sinth1 + omg3*costh1) + \
+            n*sinth3*secth2*tanth2
+        Fk[0, 2] = n*costh3*secth2
+        Fk[0, 3] = 1
+        Fk[0, 4] = sinth1*tanth2
+        Fk[0, 5] = costh1*tanth2
+        # Row 2
+        Fk[1, 0] = -sinth1*omg2 - costh1*omg3
+        Fk[1, 2] = -n*sinth3
+        Fk[1, 4] = costh1
+        Fk[1, 5] = -sinth1
+        # Row 3
+        Fk[2, 0] = secth2*(omg2*costh1 - omg3*sinth1)
+        Fk[2, 1] = tanth2*secth2*(sinth1*omg2 + costh1*omg3) + \
+            n*sinth3*secth2**2
+        Fk[2, 2] = n*tanth2*sinth3
+        Fk[2, 4] = sinth1*secth2
+        Fk[2, 5] = costh1*secth2
+        # Row 4
+        Fk[3, 0] = 3/2*K1*n**2*(1+cos2th2)*costh1
+        Fk[3, 1] = -3/2*K1*n**2*sin2th2*sinth1
+        Fk[3, 4] = K1*omg3
+        Fk[3, 5] = K1*omg2
+        # Row 5
+        Fk[4, 0] = 3/2*K2*n**2*sin2th2*sinth1
+        Fk[4, 1] = -3*K2*n**2*cos2th2*costh1
+        Fk[4, 3] = K2*omg3
+        Fk[4, 5] = K2*omg1
+        # Row 6
+        Fk[5, 0] = 3/2*K3*n**2*sin2th2*costh1
+        Fk[5, 1] = 3*K3*n**2*cos2th2**sinth1
+        Fk[5, 3] = K3*omg2
+        Fk[5, 4] = K3*omg1
+        return Fk
+
+        def sensor(self,
+                   state: np.ndarray[float]):
+            """
+            Retrieve the state from the "sensors".
+
+            Takes the given state and produces an imperfect estimate for that
+            state using the given attitude control inaccuracy and gyro bias.
+
+            Parameters
+            ----------
+            state : np.ndarray[float]
+                (True) state at which to estimate the state.
+
+            Returns
+            -------
+            measurement : np.ndarray[float]
+                A (corrupted) measurement of the state.
+            """
+            # Draw the attitude offset from a centred normal distribution
+            att_offset = self.rng.normal(loc=0,
+                                         scale=self.att_std,
+                                         size=(3,))
+            # The gyro bias is fixed, and no noise is added to that
+            # Compute and return the corrupted state estimate
+            measurement = state[:6]
+            measurement[:3] = measurement[:3] + att_offset
+            measurement[3:] = measurement[3:] + self.gyro_bias
+            return measurement
 
     def propagate_EoM(self,
                       t0: float,
@@ -525,12 +787,19 @@ class SpacecraftAttitude:
         # Enter the loop
         while tk1 < tend:
             # State estimator #################################################
-            # Take a measurement of the true state
-            z_k = self.estimator.sensor(true_state_k)
-            # Feed this measurement into the state estimator to compute
-            # an estimate for the state at tk, a prediction for the state
-            # at tk1, and a prescribed control moment over [tk, tk1]
-            x_kk, x_k1k, Mu = self.estimator.estimate(z_k)
+            if self.state_estimator is not None:
+                # Take a measurement of the true state
+                z_k = self.sensor(true_state_k)
+                # Feed this measurement into the state estimator to compute
+                # an estimate for the state at tk, a prediction for the state
+                # at tk1, and a prescribed control moment over [tk, tk1]
+                x_kk, x_k1k, P_k1k1, K_k1, Mu = self.estimator.estimate(
+                    tk, measurement_dt, z_k, x_kn1k, P_kk, K_k)
+            else:
+                # If we have no state estimator (and thus, no controller),
+                # do not command any control input
+                def Mu(t, state):
+                    return np.zeros((3,))
             ###################################################################
 
             # Propagate to next measurement epoch #############################
@@ -566,10 +835,13 @@ class SpacecraftAttitude:
             true_state_k = state_hist_tot[:, -1]
             ###################################################################
 
-            # # Set t0, tf, the initial state and the corrected estimated state
-            # # for the next loop
-            # tk = t_arr_tot[-1]
-            # tk1 = tk + measurement_dt
-            # initial_state = state_hist_tot[:, -1]
+            if (self.state_estimator is not None) and (tk1 < tend):
+                # Prepare estimator quantities for the next loop
+                # Set t0, tf, the initial state and the corrected estimated
+                # state for the next loop
+                tk = t_arr_tot[-1]
+                tk1 = tk + measurement_dt
+                initial_state = state_hist_tot[:, -1]
+                x_kn1k = x
 
         return t_arr, state_hist
