@@ -118,7 +118,8 @@ class LinearisedEoM:
         return state_deriv
 
     def propagate_EoM(self,
-                      n_orbits: float,
+                      t0: float,
+                      tend: float,
                       initial_rates: np.ndarray[float],
                       initial_att: np.ndarray[float] = np.array([10,
                                                                  10,
@@ -128,11 +129,10 @@ class LinearisedEoM:
                       atol_rate=1e-8,
                       method='RK45'):
         """
-        Propagate the linearised EoM over a given number of orbits.
+        Propagate the linearised EoM over a given timespan.
 
-        Propagate the linearised equations of motion over a given number of
-        orbits (not necessarily integral) given some initial state, and
-        return the attitude history.
+        Propagate the linearised equations of motion over a given timespan
+        given some initial state, and return the attitude history.
 
         Parameters
         ----------
@@ -140,8 +140,10 @@ class LinearisedEoM:
             Initial rates in deg/s.
         initial_att : np.ndarray[float]
             Initial attitudes in degrees.
-        n_orbits : float
-            Number of orbits over which to integrate. Need not be an integer.
+        t0 : float
+            Starting time.
+        tend : float
+            Final time.
         method : str
             Method to pass to sp.integrate.solve_ivp.
         rtol : float
@@ -168,8 +170,6 @@ class LinearisedEoM:
         atol[3:] *= atol_rate/180*np.pi
 
         # Set the integration interval
-        t0 = 0
-        tend = n_orbits*self.P
         tint = [t0, tend]
         # Perform the integration
         integrator = sp.integrate.solve_ivp(self.calc_EoM,

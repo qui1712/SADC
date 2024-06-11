@@ -42,7 +42,8 @@ delta = .1/180*np.pi  # rad, tracking error
 h = 700e3  # m, altitude
 n = np.sqrt(const.GM_earth.value/(
     const.R_earth.value+700e3)**3)  # rad/s, mean motion
-
+P = 2*np.pi/n  # s, orbital period
+measurement_rate = 100  # 1/s, measurement rate
 # %% Verification of the equations of motion
 # Initialise an idle controller and perfect estimator.
 idle_controller = Controller(
@@ -58,10 +59,13 @@ linear_eom = LinearisedEoM()
 # Propagate
 initial_rates = np.array([1, 1, 1])*1e-3
 initial_att = np.array([2, 2, 2])
-t_arr, state_hist = attitude_perfect.propagate_EoM(1/50,
+t_arr, state_hist = attitude_perfect.propagate_EoM(0,
+                                                   1/50*P,
+                                                   measurement_rate,
                                                    initial_rates,
                                                    initial_att)
-t_arr_l, state_hist_l = linear_eom.propagate_EoM(1/50,
+t_arr_l, state_hist_l = linear_eom.propagate_EoM(0,
+                                                 1/50*P,
                                                  initial_rates,
                                                  initial_att)
 
@@ -126,7 +130,9 @@ initial_rates = np.zeros((3,))
 initial_rates[1] = -n/np.pi*180
 initial_rates += np.array([1, 1, 1])
 initial_att = np.array([10, 10, 10])
-t_arr, state_hist = controlled_attitude.propagate_EoM(1,
+t_arr, state_hist = controlled_attitude.propagate_EoM(0,
+                                                      P,
+                                                      measurement_rate,
                                                       initial_rates,
                                                       initial_att)
 fig2, ax2 = plt.subplots(1, 2)
@@ -143,7 +149,9 @@ ax2[1].plot(t_arr, state_hist[5, :]*180/np.pi)
 initial_rates = np.zeros((3,))
 initial_rates[1] = -n/np.pi*180
 initial_att = np.array([10, 10, 10])
-t_arr_ref, state_hist_ref = controlled_attitude.propagate_EoM(.2,
+t_arr_ref, state_hist_ref = controlled_attitude.propagate_EoM(0,
+                                                              .2*P,
+                                                              measurement_rate,
                                                               initial_rates,
                                                               initial_att)
 t_sett_ref1 = settling_time(t_arr_ref, state_hist_ref[0, :],
@@ -191,7 +199,7 @@ for n_draw in range(n_draws):
     # Draw random initial attitude in each direction
     initial_att = np.random.normal(0, scale=10, size=3)
     t_arr, state_hist = controlled_attitude.propagate_EoM(
-        .2, initial_rates, initial_att)
+        0, .2*P, measurement_rate, initial_rates, initial_att)
     t_sett[0, n_draw+1] = settling_time(t_arr, state_hist[0, :],
                                         0, .1/180*np.pi)
     t_sett[1, n_draw+1] = settling_time(t_arr, state_hist[1, :],
@@ -224,7 +232,9 @@ initial_rates = np.zeros((3,))
 initial_rates[1] = -n/np.pi*180
 initial_rates += np.ones((3,))
 initial_att = np.array([10, 10, 10])
-t_arr_ref, state_hist_ref = controlled_attitude.propagate_EoM(.2,
+t_arr_ref, state_hist_ref = controlled_attitude.propagate_EoM(0,
+                                                              .2*P,
+                                                              measurement_rate,
                                                               initial_rates,
                                                               initial_att)
 t_sett_ref1 = settling_time(t_arr_ref, state_hist_ref[0, :],
@@ -273,7 +283,7 @@ for n_draw in range(n_draws):
     # Draw random initial attitude in each direction
     initial_att = np.random.normal(0, scale=10, size=3)
     t_arr, state_hist = controlled_attitude.propagate_EoM(
-        .2, initial_rates, initial_att)
+        0, .2*P, measurement_rate, initial_rates, initial_att)
     t_sett[0, n_draw+1] = settling_time(t_arr, state_hist[0, :],
                                         0, .1/180*np.pi)
     t_sett[1, n_draw+1] = settling_time(t_arr, state_hist[1, :],
