@@ -48,6 +48,9 @@ class LinearisedEoM:
             Moment of inertia about axis 3, in kg m^2.
         h : float
             Altitude of the spacecraft in m.
+        Td : np.ndarray[float]
+            Disturbance torques: in particular, a constant torque used here
+            to verify the proper implementation of the equations of motion.
         """
         # Save the moments of inertia to attributes
         self.J_11 = J_11
