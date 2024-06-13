@@ -446,10 +446,10 @@ class KalmanEstimator:
         self.h = h
         self.P = 2*np.pi/n
         # Save the covariance estimate converted to rad
-        self.P0 = P0/(180*np.pi)**2
+        self.P0 = P0*(np.pi/180)**2
         # Set the maximum allowed values of the predicted state covariance
         # matrix diagonal
-        att_req = 0.1/180*np.pi
+        att_req = (0.1/180*np.pi)
         vel_req = (n/10)**2
         self.P_req = np.array([att_req**2, att_req**2, att_req**2,
                                vel_req, vel_req, vel_req,
@@ -968,7 +968,7 @@ class SpacecraftAttitude:
         Fk[4, 5] = K2*omg1
         # Row 6
         Fk[5, 0] = 3/2*K3*n**2*sin2th2*costh1
-        Fk[5, 1] = 3*K3*n**2*cos2th2**sinth1
+        Fk[5, 1] = 3*K3*n**2*cos2th2*sinth1
         Fk[5, 3] = K3*omg2
         Fk[5, 4] = K3*omg1
         return Fk
@@ -981,9 +981,10 @@ class SpacecraftAttitude:
                       initial_att: np.ndarray[float] = np.array([10,
                                                                  10,
                                                                  10]),
-                      rtol=1e-7,
-                      atol_att=1e-7,
-                      atol_rate=1e-9,
+                      rtol=1e-4,
+                      atol_att=1e-6,
+                      atol_rate=1e-7,
+                      max_step=10,
                       method='RK45'):
         """
         Propagate the equations of motion over a given timespan.
@@ -1001,8 +1002,10 @@ class SpacecraftAttitude:
             Starting time.
         tend : float
             Final time.
-        measurement_dt : float
-            Time between sensor measurements in s.
+        measurement_dt : float or function
+            Time between sensor measurements in s, or a function that takes
+            a single argument t, being the current time in seconds, and
+            returns a time difference.
         method : str
             Method to pass to sp.integrate.solve_ivp.
         rtol : float
@@ -1014,6 +1017,8 @@ class SpacecraftAttitude:
         atol_rate : float
             Absolute tolerance for the angular velocities in deg/s. Used in
             both the propagation of the true state and the Kalman filter.
+        max_step : float
+            Maximum allowed timestep in seconds.
 
         Returns
         -------
@@ -1022,6 +1027,8 @@ class SpacecraftAttitude:
         state_hist_tot : np.ndarray[float]
             True attitude state history of the spacecraft.
         """
+        # Check whether measurement_dt is callable
+        dt_func = callable(measurement_dt)
         # Convert the true initial state to rad and rad/s
         initial_state = np.zeros((6,))
         initial_state[:3] = initial_att/180*np.pi
@@ -1038,7 +1045,11 @@ class SpacecraftAttitude:
         state_hist_tot = initial_state.reshape((initial_state.shape[0], 1))
         commanded_Mu_hist = None
         tk = t0
-        tk1 = tk + measurement_dt
+        if dt_func:
+            dt = measurement_dt(tk)
+        else:
+            dt = measurement_dt
+        tk1 = tk + dt
         # Enter the loop
         while tk1 <= tend:
             print(tk)
@@ -1050,7 +1061,7 @@ class SpacecraftAttitude:
                 # Feed this measurement into the state estimator to compute
                 # an estimate for the state at tk, a prediction for the state
                 # at tk1, and a prescribed control moment over [tk, tk1]
-                Mu = self.estimator.estimate(tk, measurement_dt, z_k)
+                Mu = self.estimator.estimate(tk, dt, z_k)
             else:
                 # If we have no state estimator (and thus, no controller),
                 # do not command any control input
@@ -1073,7 +1084,8 @@ class SpacecraftAttitude:
                                                 initial_state,
                                                 method=method,
                                                 rtol=rtol,
-                                                atol=atol)
+                                                atol=atol,
+                                                max_step=max_step)
             # Save the results
             # Extract the time and state history
             t_arr = integrator.t
@@ -1098,10 +1110,14 @@ class SpacecraftAttitude:
             # Prepare estimator quantities for the next loop
             # Set t0, tf and the true initial state
             tk = t_arr_tot[-1]
-            tk1 = tk + measurement_dt
+            if dt_func:
+                dt = measurement_dt(tk)
+            else:
+                dt = measurement_dt
+            tk1 = tk + dt
             if (tk1 > tend) and not np.isclose(tk, tend):
                 # Propagate until the end
                 tk1 = tend
-                measurement_dt = tk1-tk
+                dt = tk1-tk
             initial_state = state_hist_tot[:, -1]
         return t_arr_tot, state_hist_tot

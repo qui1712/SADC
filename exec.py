@@ -383,9 +383,16 @@ controlled_attitude = SpacecraftAttitude(estimator=kalman_estimator,
 initial_rates = np.zeros((3,))
 initial_rates[1] = -n/np.pi*180
 initial_att = np.array([10, 10, 10])
+
+
+def dt_over_time1(t):
+    return .1
+
+
 t_arr_ref, state_hist_ref = controlled_attitude.propagate_EoM(0,
-                                                              .2*P,
-                                                              .5,
+                                                              # .2*P,
+                                                              100,
+                                                              dt_over_time1,
                                                               initial_rates,
                                                               initial_att)
 t_sett_ref1 = settling_time(t_arr_ref, state_hist_ref[0, :],
@@ -394,7 +401,7 @@ t_sett_ref2 = settling_time(t_arr_ref, state_hist_ref[1, :],
                             0, .1/180*np.pi)
 t_sett_ref3 = settling_time(t_arr_ref, state_hist_ref[2, :],
                             0, .1/180*np.pi)
-# Plot the result
+# %% Plot the result
 color1 = 'tab:blue'
 color2 = 'tab:orange'
 color3 = 'tab:green'
@@ -420,15 +427,15 @@ ax3[0].plot(t_est, state_est[1, :]*180/np.pi,
 ax3[0].plot(t_est, state_est[2, :]*180/np.pi,
             color=color3, label='Est. $\\theta_3$', linestyle='dashed')
 # Measurements
-ax3[0].scatter(t_meas, measurements[0, :]*180/np.pi,
-               color=color1, label='$\\theta_1$',
-               marker='x', alpha=.1)
-ax3[0].scatter(t_meas, measurements[1, :]*180/np.pi,
-               color=color2, label='$\\theta_2$',
-               marker='x', alpha=.1)
-ax3[0].scatter(t_meas, measurements[2, :]*180/np.pi,
-               color=color3, label='$\\theta_3$',
-               marker='x', alpha=.1)
+# ax3[0].scatter(t_meas, measurements[0, :]*180/np.pi,
+#                color=color1, label='Meas. $\\theta_1$',
+#                marker='x', alpha=.1)
+# ax3[0].scatter(t_meas, measurements[1, :]*180/np.pi,
+#                color=color2, label='Meas. $\\theta_2$',
+#                marker='x', alpha=.1)
+# ax3[0].scatter(t_meas, measurements[2, :]*180/np.pi,
+#                color=color3, label='Meas. $\\theta_3$',
+#                marker='x', alpha=.1)
 
 ax3[0].set_xlabel('Time [s]')
 ax3[0].set_ylabel('Euler angle [$^{\\circ}$]')
@@ -449,15 +456,15 @@ ax3[1].plot(t_est, state_est[4, :]*180/np.pi,
 ax3[1].plot(t_est, state_est[5, :]*180/np.pi,
             color=color3, label='Est. $\\omega_3$', linestyle='dashed')
 # Measurements
-ax3[1].scatter(t_meas, measurements[3, :]*180/np.pi,
-               color=color1, label='$\\omega_1$',
-               marker='x', alpha=.1)
-ax3[1].scatter(t_meas, measurements[4, :]*180/np.pi,
-               color=color2, label='$\\omega_2$',
-               marker='x', alpha=.1)
-ax3[1].scatter(t_meas, measurements[5, :]*180/np.pi,
-               color=color3, label='$\\omega_3$',
-               marker='x', alpha=.1)
+# ax3[1].scatter(t_meas, measurements[3, :]*180/np.pi,
+#                color=color1, label='Meas. $\\omega_1$',
+#                marker='x', alpha=.1)
+# ax3[1].scatter(t_meas, measurements[4, :]*180/np.pi,
+#                color=color2, label='Meas. $\\omega_2$',
+#                marker='x', alpha=.1)
+# ax3[1].scatter(t_meas, measurements[5, :]*180/np.pi,
+#                color=color3, label='Meas. $\\omega_3$',
+#                marker='x', alpha=.1)
 
 
 ax3[1].set_xlabel('Time [s]')
@@ -467,3 +474,256 @@ ax3[0].axhline(-.1, color='grey', alpha=1)
 ax3[1].axhline(-n/np.pi*180, color='grey', alpha=1, label='-n')
 ax3[0].legend()
 ax3[1].legend()
+
+# Plot also the estimated/predicted state error; do this by interpolating the
+# true state onto the timestamps for the estimated state and taking their
+# difference
+true_state_interp = sp.interpolate.CubicSpline(
+    t_arr_ref,
+    state_hist_ref,
+    axis=1)(t_est)
+err = state_est - true_state_interp
+# Also extract the estimated errors
+tk_hist = controlled_attitude.estimator.t_hist
+err_est = np.zeros((6, tk_hist.shape[0]))
+# Extract the variances
+for i in range(6):
+    err_est[i, :] = np.sqrt(controlled_attitude.estimator.P_kk_hist[i, i, :])
+fig4, ax4 = plt.subplots(1, 2)
+ax4[0].plot(t_est, err[0, :]*180/np.pi,
+            color=color1, label='Error in $\\theta_1$')
+ax4[0].plot(t_est, err[1, :]*180/np.pi,
+            color=color2, label='Error in $\\theta_2$')
+ax4[0].plot(t_est, err[2, :]*180/np.pi,
+            color=color3, label='Error in $\\theta_3$')
+
+ax4[0].plot(tk_hist, err_est[0, :]*180/np.pi,
+            color=color1, label='Est. error in $\\theta_1$',
+            linestyle='dashed')
+ax4[0].plot(tk_hist, err_est[1, :]*180/np.pi,
+            color=color2, label='Est. error in $\\theta_2$',
+            linestyle='dashed')
+ax4[0].plot(tk_hist, err_est[2, :]*180/np.pi,
+            color=color3, label='Est. error in $\\theta_3$',
+            linestyle='dashed')
+ax4[0].plot(tk_hist, -err_est[0, :]*180/np.pi,
+            color=color1, linestyle='dashed')
+ax4[0].plot(tk_hist, -err_est[1, :]*180/np.pi,
+            color=color2, linestyle='dashed')
+ax4[0].plot(tk_hist, -err_est[2, :]*180/np.pi,
+            color=color3, linestyle='dashed')
+
+ax4[0].set_xlabel('Time [s]')
+ax4[0].set_ylabel('Error [$^{\circ}$]')
+ax4[0].set_ylim((-0.01, 0.01))
+ax4[0].set_yscale('symlog')
+ax4[0].legend()
+
+ax4[1].plot(t_est, err[3, :]*180/np.pi,
+            color=color1, label='Error in $\\omega_1$')
+ax4[1].plot(t_est, err[4, :]*180/np.pi,
+            color=color2, label='Error in $\\omega_2$')
+ax4[1].plot(t_est, err[5, :]*180/np.pi,
+            color=color3, label='Error in $\\omega_3$')
+
+ax4[1].plot(tk_hist, err_est[3, :]*180/np.pi,
+            color=color1, label='Est. error in $\\omega_1$',
+            linestyle='dashed')
+ax4[1].plot(tk_hist, err_est[4, :]*180/np.pi,
+            color=color2, label='Est. error in $\\omega_2$',
+            linestyle='dashed')
+ax4[1].plot(tk_hist, err_est[5, :]*180/np.pi,
+            color=color3, label='Est. error in $\\omega_3$',
+            linestyle='dashed')
+ax4[1].plot(tk_hist, -err_est[3, :]*180/np.pi,
+            color=color1, linestyle='dashed')
+ax4[1].plot(tk_hist, -err_est[4, :]*180/np.pi,
+            color=color2, linestyle='dashed')
+ax4[1].plot(tk_hist, -err_est[5, :]*180/np.pi,
+            color=color3, linestyle='dashed')
+
+ax4[1].set_xlabel('Time [s]')
+ax4[1].set_ylabel('Error [$^{\circ}$/s]')
+ax4[1].set_ylim((-0.0001, 0.0001))
+ax4[1].set_yscale('symlog')
+ax4[1].legend()
+
+
+# %% Now do noisy but unbiased disturbance torques
+# Initialise the Kalman filter
+kalman_estimator = KalmanEstimator(controller)
+sensor = Sensor()
+controlled_attitude = SpacecraftAttitude(estimator=kalman_estimator,
+                                         sensor=sensor,
+                                         Td_std=1e-3*np.ones((3,)))
+
+
+def dt_over_time2(t):
+    if t < 180:
+        return .1
+    else:
+        return 10
+
+
+# Reference scenario
+initial_rates = np.zeros((3,))
+initial_rates[1] = -n/np.pi*180
+initial_att = np.array([10, 10, 10])
+t_arr_ref, state_hist_ref = controlled_attitude.propagate_EoM(0,
+                                                              .2*P,
+                                                              # 100,
+                                                              dt_over_time2,
+                                                              initial_rates,
+                                                              initial_att)
+t_sett_ref1 = settling_time(t_arr_ref, state_hist_ref[0, :],
+                            0, .1/180*np.pi)
+t_sett_ref2 = settling_time(t_arr_ref, state_hist_ref[1, :],
+                            0, .1/180*np.pi)
+t_sett_ref3 = settling_time(t_arr_ref, state_hist_ref[2, :],
+                            0, .1/180*np.pi)
+# %% Plot the result
+color1 = 'tab:blue'
+color2 = 'tab:orange'
+color3 = 'tab:green'
+fig3, ax3 = plt.subplots(1, 2)
+# Plot true, estimated states and measurements
+measurements = controlled_attitude.sensor.measurements
+t_meas = controlled_attitude.sensor.t_arr
+
+# True states
+ax3[0].plot(t_arr_ref, state_hist_ref[0, :]*180/np.pi,
+            color=color1, label='$\\theta_1$')
+ax3[0].plot(t_arr_ref, state_hist_ref[1, :]*180/np.pi,
+            color=color2, label='$\\theta_2$')
+ax3[0].plot(t_arr_ref, state_hist_ref[2, :]*180/np.pi,
+            color=color3, label='$\\theta_3$')
+# Estimated states
+state_est = np.array(controlled_attitude.estimator.predict_state_hist_cont)
+t_est = controlled_attitude.estimator.predict_t_cont
+ax3[0].plot(t_est, state_est[0, :]*180/np.pi,
+            color=color1, label='Est. $\\theta_1$', linestyle='dashed')
+ax3[0].plot(t_est, state_est[1, :]*180/np.pi,
+            color=color2, label='Est. $\\theta_2$', linestyle='dashed')
+ax3[0].plot(t_est, state_est[2, :]*180/np.pi,
+            color=color3, label='Est. $\\theta_3$', linestyle='dashed')
+# Measurements
+# ax3[0].scatter(t_meas, measurements[0, :]*180/np.pi,
+#                color=color1, label='Meas. $\\theta_1$',
+#                marker='x', alpha=.2)
+# ax3[0].scatter(t_meas, measurements[1, :]*180/np.pi,
+#                color=color2, label='Meas. $\\theta_2$',
+#                marker='x', alpha=.2)
+# ax3[0].scatter(t_meas, measurements[2, :]*180/np.pi,
+#                color=color3, label='Meas. $\\theta_3$',
+#                marker='x', alpha=.2)
+
+ax3[0].set_xlabel('Time [s]')
+ax3[0].set_ylabel('Euler angle [$^{\\circ}$]')
+ax3[0].set_yscale('symlog')
+
+# True states
+ax3[1].plot(t_arr_ref, state_hist_ref[3, :]*180/np.pi,
+            color=color1, label='$\\omega_1$')
+ax3[1].plot(t_arr_ref, state_hist_ref[4, :]*180/np.pi,
+            color=color2, label='$\\omega_2$')
+ax3[1].plot(t_arr_ref, state_hist_ref[5, :]*180/np.pi,
+            color=color3, label='$\\omega_3$')
+# Estimated states
+ax3[1].plot(t_est, state_est[3, :]*180/np.pi,
+            color=color1, label='Est. $\\omega_1$', linestyle='dashed')
+ax3[1].plot(t_est, state_est[4, :]*180/np.pi,
+            color=color2, label='Est. $\\omega_2$', linestyle='dashed')
+ax3[1].plot(t_est, state_est[5, :]*180/np.pi,
+            color=color3, label='Est. $\\omega_3$', linestyle='dashed')
+# Measurements
+# ax3[1].scatter(t_meas, measurements[3, :]*180/np.pi,
+#                color=color1, label='Meas. $\\omega_1$',
+#                marker='x', alpha=.2)
+# ax3[1].scatter(t_meas, measurements[4, :]*180/np.pi,
+#                color=color2, label='Meas. $\\omega_2$',
+#                marker='x', alpha=.2)
+# ax3[1].scatter(t_meas, measurements[5, :]*180/np.pi,
+#                color=color3, label='Meas. $\\omega_3$',
+#                marker='x', alpha=.2)
+
+
+ax3[1].set_xlabel('Time [s]')
+ax3[1].set_ylabel('Rotational velocity [$^{\\circ}/s$]')
+ax3[0].axhline(.1, color='grey', alpha=1, label='Accuracy\nrequirement')
+ax3[0].axhline(-.1, color='grey', alpha=1)
+ax3[1].axhline(-n/np.pi*180, color='grey', alpha=1, label='-n')
+ax3[0].legend(loc="upper right")
+ax3[1].legend(loc="upper right")
+
+# Plot also the estimated/predicted state error; do this by interpolating the
+# true state onto the timestamps for the estimated state and taking their
+# difference
+true_state_interp = sp.interpolate.CubicSpline(
+    t_arr_ref,
+    state_hist_ref,
+    axis=1)(t_est)
+err = state_est - true_state_interp
+# Also extract the estimated errors
+tk_hist = controlled_attitude.estimator.t_hist
+err_est = np.zeros((6, tk_hist.shape[0]))
+# Extract the variances
+for i in range(6):
+    err_est[i, :] = np.sqrt(controlled_attitude.estimator.P_kk_hist[i, i, :])
+fig4, ax4 = plt.subplots(1, 2)
+ax4[0].plot(t_est, err[0, :]*180/np.pi,
+            color=color1, label='Error in $\\theta_1$')
+ax4[0].plot(t_est, err[1, :]*180/np.pi,
+            color=color2, label='Error in $\\theta_2$')
+ax4[0].plot(t_est, err[2, :]*180/np.pi,
+            color=color3, label='Error in $\\theta_3$')
+
+ax4[0].plot(tk_hist, err_est[0, :]*180/np.pi,
+            color=color1, label='Est. error in $\\theta_1$',
+            linestyle='dashed')
+ax4[0].plot(tk_hist, err_est[1, :]*180/np.pi,
+            color=color2, label='Est. error in $\\theta_2$',
+            linestyle='dashed')
+ax4[0].plot(tk_hist, err_est[2, :]*180/np.pi,
+            color=color3, label='Est. error in $\\theta_3$',
+            linestyle='dashed')
+ax4[0].plot(tk_hist, -err_est[0, :]*180/np.pi,
+            color=color1, linestyle='dashed')
+ax4[0].plot(tk_hist, -err_est[1, :]*180/np.pi,
+            color=color2, linestyle='dashed')
+ax4[0].plot(tk_hist, -err_est[2, :]*180/np.pi,
+            color=color3, linestyle='dashed')
+
+ax4[0].set_xlabel('Time [s]')
+ax4[0].set_ylabel('Error [$^{\circ}$]')
+ax4[0].set_ylim((-0.1, 0.1))
+ax4[0].set_yscale('symlog')
+ax4[0].legend()
+
+ax4[1].plot(t_est, err[3, :]*180/np.pi,
+            color=color1, label='Error in $\\omega_1$')
+ax4[1].plot(t_est, err[4, :]*180/np.pi,
+            color=color2, label='Error in $\\omega_2$')
+ax4[1].plot(t_est, err[5, :]*180/np.pi,
+            color=color3, label='Error in $\\omega_3$')
+
+ax4[1].plot(tk_hist, err_est[3, :]*180/np.pi,
+            color=color1, label='Est. error in $\\omega_1$',
+            linestyle='dashed')
+ax4[1].plot(tk_hist, err_est[4, :]*180/np.pi,
+            color=color2, label='Est. error in $\\omega_2$',
+            linestyle='dashed')
+ax4[1].plot(tk_hist, err_est[5, :]*180/np.pi,
+            color=color3, label='Est. error in $\\omega_3$',
+            linestyle='dashed')
+ax4[1].plot(tk_hist, -err_est[3, :]*180/np.pi,
+            color=color1, linestyle='dashed')
+ax4[1].plot(tk_hist, -err_est[4, :]*180/np.pi,
+            color=color2, linestyle='dashed')
+ax4[1].plot(tk_hist, -err_est[5, :]*180/np.pi,
+            color=color3, linestyle='dashed')
+
+ax4[1].set_xlabel('Time [s]')
+ax4[1].set_ylabel('Error [$^{\circ}$/s]')
+ax4[1].set_ylim((-0.001, 0.001))
+ax4[1].set_yscale('symlog')
+ax4[1].legend()
