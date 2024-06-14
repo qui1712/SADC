@@ -375,9 +375,9 @@ class KalmanEstimator:
                  J_33: float = 3100,
                  h: float = 700e3,
                  method='RK45',
-                 rtol=1e-7,
+                 rtol=1e-4,
                  atol_att=1e-6,
-                 atol_rate=1e-8):
+                 atol_rate=1e-7):
         """
         Initialise the estimator.
 
